@@ -41,10 +41,7 @@ namespace shop.Controllers
             {
                 return NotFound();
             }
-            return await _context.Users
-            .Include(x => x.UserRoles)
-            .ThenInclude(x => x.Role)
-            .ToListAsync();
+            return await _context.Users.ToListAsync();
         }
 
         // GET: api/Account/5
@@ -55,62 +52,62 @@ namespace shop.Controllers
             {
                 return NotFound();
             }
-            var apiUser = await _context.Users
-            .Include(u => u.UserRoles)
-            .ThenInclude(u => u.Role)
-            .FirstOrDefaultAsync(u => u.Id == id);
 
-            // FindAsync(id);
+            var apiUser = await _context.Users.FindAsync(id);
 
             if (apiUser == null)
             {
                 return NotFound();
             }
 
-            return apiUser;
+            var userRoles = await _userManager.GetRolesAsync(apiUser);
+
+            return Ok(new
+            {
+                user = apiUser,
+                role = userRoles
+            });
         }
 
         // PUT: api/Account/5
         // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutApiUser(string id, ApiUser apiUser)
+        public async Task<IActionResult> PutApiUser(string id, [FromBody] UpdateUserDTO userDTO)
         {
-            if (id != apiUser.Id)
+            var apiUser = await _context.Users.FindAsync(id);
+
+            if (apiUser == null)
             {
-                return BadRequest();
+                return NotFound();
             }
 
-            _context.Entry(apiUser).State = EntityState.Modified;
+            var userRoles = await _userManager.GetRolesAsync(apiUser);
 
-            var user = await _context.Users
-                .Include(u => u.UserRoles).
-                ThenInclude(r => r.RoleId).
-                FirstOrDefaultAsync(u => u.Id == id);
+            var checkEmail = _context.Users.FirstOrDefault(x => x.Email == userDTO.Email && x.Id != apiUser.Id);
 
-            List<string> roleList = new List<string>();
-            foreach (var role in user.UserRoles)
+            if (checkEmail != null)
             {
-                roleList.Add(role.Role.Name);
+                ModelState.AddModelError("email", "Email already exist.");
+                BadRequest(ModelState);
             }
 
-            string[] roleArray = roleList.ToArray();
-
-            await _userManager.RemoveFromRolesAsync(user, roleArray);
+            // set data values
+            apiUser.Email = userDTO.Email;
+            apiUser.FirstName = userDTO.FirstName;
+            apiUser.LastName = userDTO.LastName;
 
             try
             {
-                await _context.SaveChangesAsync();
+                // update info of the user
+                await _userManager.UpdateAsync(apiUser);
+
+                // update roles of the user
+                await _userManager.RemoveFromRolesAsync(apiUser, userRoles);
+                await _userManager.AddToRolesAsync(apiUser, userDTO.Roles);
             }
             catch (DbUpdateConcurrencyException)
             {
-                if (!ApiUserExists(id))
-                {
-                    return NotFound();
-                }
-                else
-                {
-                    throw;
-                }
+                throw;
             }
 
             return NoContent();
